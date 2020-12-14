@@ -79,6 +79,9 @@ const ReadHistory = definition.model({
     },
     lastEmailNotification: {
       type: String
+    },
+    lastSmsNotification: {
+      type: String
     }
   },
   indexes: {
@@ -492,6 +495,18 @@ definition.event({
   }
 })
 
+definition.event({
+  name: "smsNotification",
+  async execute({ user, publicSessionInfo, toType, toId, eventId }) {
+    const id = (user ? `user_${user}` : `session_${publicSessionInfo}`) + `_${toType}_${toId}`
+    ReadHistory.update(id, [
+      { op: 'reverseMerge', value: { id, user, publicSessionInfo, toType, toId } }, // If not exists
+      { op: 'max', property: 'lastSmsNotification', value: eventId }
+    ])
+  }
+})
+
+
 definition.trigger({
   name: 'readHistoryEvent',
   properties: {
@@ -570,6 +585,27 @@ definition.trigger({
         console.log("TIMER CREATED")
       }
     }
+
+    const smsNotification = lastWriteTime.getTime() + (config.smsNotificationDelay - 10000)
+    const smsNotificationTimestamp = Date.now() + config.smsNotificationDelay + config.smsNotificationCheckDelay
+    for(const user of toUsers) {
+      console.log("NEW EVENT")
+      if(smsNotification && config.sms[toType]) {
+        console.log("CREATE TIMER", (new Date(smsNotificationTimestamp)).toISOString())
+        await app.trigger({
+          type: 'createTimer',
+          timer: {
+            timestamp: smsNotificationTimestamp,
+            service: 'readHistory',
+            trigger: {
+              type: 'checkSmsNotificationState',
+              user, toType, toId
+            }
+          }
+        })
+        console.log("TIMER CREATED")
+      }
+    }
   }
 })
 
@@ -612,6 +648,52 @@ definition.trigger({
       console.log("EMAIL SENT!")
     } else {
       console.log("NO EMAIL NEEDED!")
+    }
+  }
+})
+
+definition.trigger({
+  name: 'checkSmsNotificationState',
+  properties: {
+    user: {
+      type: User
+    },
+    toType: {
+      type: String
+    },
+    toId: {
+      type: String
+    }
+  },
+  waitForEvents: true,
+  queuedBy: ['user', 'toType', 'toId'],
+  async execute({ user, toType, toId }, { service }, emit) {
+    console.log("STARTED SMS CHECK!", user, toType, toId)
+    const readHistory =  await ReadHistory.indexObjectGet('userReadHistory', [user, toType, toId])
+    if(readHistory.lastSmsNotification > readHistory.last) return // already notified about everything
+
+    console.log("GOT READ HISTORY!", readHistory.lastSmsNotification)
+
+    const result = await config.sms[toType](readHistory)
+
+    if(typeof result == 'object') {
+      const { sms, lastSent } = result
+      console.log("SENDING SMS!")
+      //console.log("NOTIFICATION SMS", sms)
+      emit({
+        type: "smsNotification",
+        user, toType, toId, eventId: lastSent
+      })
+      const phone = sms.phone.replace(/[ -]/g,'').replace(/^0/,'+')
+      await service.trigger({
+        type:"sendSms",
+        smsId: app.generateUid(),
+        phone,
+        text: sms.text
+      })
+      console.log("SMS SENT!")
+    } else {
+      console.log("NO SMS NEEDED!")
     }
   }
 })
