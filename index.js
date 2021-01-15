@@ -674,7 +674,10 @@ definition.trigger({
 
     console.log("GOT READ HISTORY!", readHistory.lastSmsNotification)
 
-    const result = await config.sms[toType](readHistory)
+    const result = await app.assertTime("generate sms", 5000,
+        () => config.sms[toType](readHistory), toType, readHistory)
+
+    console.log("GENERATED SMS", result)
 
     if(typeof result == 'object') {
       const { sms, lastSent } = result
