@@ -19,38 +19,86 @@ const { getAccess, hasRole, checkIfRole, getPublicInfo } =
 const User = definition.foreignModel('users', 'User')
 const PublicSessionInfo = definition.foreignModel('accessControl', 'PublicSessionInfo')
 
-const unreadHistoriesIndexFunction = async function(input, output, { idFunction }) {
+
+const unreadHistoriesCountFunction = async function(input, output, { idFunction }) {
   const getId = eval(idFunction)
-  await input.table('readHistory_ReadHistory').onChange((obj, oldObj) => {
-    const id = obj ? getId(obj) : getId(oldObj)
-    const oldUnread = !!(oldObj && (oldObj.read||'') < (oldObj.last||''))
-    const unread = !!(obj && (obj.read||'') < (obj.last||''))
-    if(!id) return
-    if(unread != oldUnread) {
-      if(unread) {
-        output.update(id, [
-          { op: "addToSet", property: 'unread', value: obj.id }
-        ])
-      } else {
-        output.update(id, [
-          { op: "deleteFromSet", property: 'unread', value: obj.id }
-        ])
+  await input.table('readHistory_ReadHistory').onChange(
+      (obj, oldObj, id, ts) => {
+        const indexId = obj ? getId(obj) : getId(oldObj)
+        if(!indexId) return
+        const unread = obj && (obj.read||'') < (obj.last||'')
+        const oldUnread = oldObj && (oldObj.read||'') < (oldObj.last||'')
+        if(unread && !oldUnread) { // now unread
+          output.update(indexId, [
+            { op: "conditional",
+              conditions: [
+                { test: 'notExist', property: 'unread' }
+              ],
+              operations: [
+                { op: 'set', property: 'unread', value: 1 },
+                { op: 'set', property: 'unreadUpdate', value: ts }
+              ]
+            },
+            { op: "conditional",
+              conditions: [
+                { test: 'lt', property: 'unreadUpdate', value: ts }
+              ],
+              operations: [
+                { op: 'add', property: 'unread', value: 1 }
+              ]
+            },
+            { op: 'merge', value: { severity: obj.severity, scan: obj.scan, unreadUpdate: ts } },
+          ])
+        } else if(!unread && oldUnread) { // been unread
+          output.update(indexId, [
+            { op: "conditional",
+              conditions: [
+                { test: 'lt', property: 'unreadUpdate', value: ts }
+              ],
+              operations: [
+                { op: 'add', property: 'unread', value: -1 }
+              ]
+            }
+          ])
+        }
+
+        const unanswered = obj && (obj.write||'') > (obj.last||'')
+        const oldUnanswered = oldObj && (oldObj.write||'') > (oldObj.last||'')
+        if(unanswered && !oldUnanswered) { // now unread
+          output.update(indexId, [
+            { op: "conditional",
+              conditions: [
+                { test: 'notExist', property: 'unanswered' }
+              ],
+              operations: [
+                { op: 'set', property: 'unanswered', value: 1 },
+                { op: 'set', property: 'unansweredUpdate', value: ts }
+              ]
+            },
+            { op: "conditional",
+              conditions: [
+                { test: 'lt', property: 'unansweredUpdate', value: ts }
+              ],
+              operations: [
+                { op: 'add', property: 'unanswered', value: 1 }
+              ]
+            },
+            { op: 'merge', value: { severity: obj.severity, scan: obj.scan, unansweredUpdate: ts } },
+          ])
+        } else if(!unanswered && oldUnanswered) { // been unread
+          output.update(indexId, [
+            { op: "conditional",
+              conditions: [
+                { test: 'lt', property: 'unansweredUpdate', value: ts }
+              ],
+              operations: [
+                { op: 'add', property: 'unanswered', value: -1 }
+              ]
+            }
+          ])
+        }
       }
-    }
-    const oldUnanswered = !!(oldObj && (oldObj.write||'') > (oldObj.last||''))
-    const unanswered = !!(obj && (obj.write||'') > (obj.last||''))
-    if(unanswered != oldUnanswered) {
-      if(unread) {
-        output.update(id, [
-          { op: "addToSet", property: 'unanswered', value: obj.id }
-        ])
-      } else {
-        output.update(id, [
-          { op: "deleteFromSet", property: 'unanswered', value: obj.id }
-        ])
-      }
-    }
-  })
+  )
 }
 
 const ReadHistory = definition.model({
@@ -118,84 +166,30 @@ const ReadHistory = definition.model({
     },
 
     //*
-    userUnreadHistoriesIds: { /// For counting
-      function: unreadHistoriesIndexFunction,
+    userUnreadHistoriesCount: { /// For counting
+      function: unreadHistoriesCountFunction,
       parameters: {
         idFunction: `(${(obj => obj.user)})`
       }
     },
-    sessionUnreadHistoriesIds: { /// For Counting
-      function: unreadHistoriesIndexFunction,
+    sessionUnreadHistoriesCount: { /// For Counting
+      function: unreadHistoriesCountFunction,
       parameters: {
         idFunction: `(${(obj => obj.publicSessionInfo)})`
       }
     },
-    userUnreadHistoriesIdsByType: { /// For counting
-      function: unreadHistoriesIndexFunction,
+    userUnreadHistoriesCountByType: { /// For counting
+      function: unreadHistoriesCountFunction,
       parameters: {
         idFunction: `(${(obj => `${obj.user}_${obj.toType}`)})`
       }
     },
-    sessionUnreadHistoriesIdsByType: { /// For Counting
-      function: unreadHistoriesIndexFunction,
+    sessionUnreadHistoriesCountByType: { /// For Counting
+      function: unreadHistoriesCountFunction,
       parameters: {
         idFunction: `(${(obj => `${obj.publicSessionInfo}_${obj.toType}`)})`
       }
-    },
-
-    userUnreadHistoriesCount: { /// For counting
-      function: async function(input, output) {
-        function mapper(obj) {
-          return obj && { id: obj.id,
-            unread: obj.unread && obj.unread.length || 0,
-            unanswered: obj.unanswered && obj.unanswered.length || 0
-          }
-        }
-        await input.index('readHistory_ReadHistory_userUnreadHistoriesIds').onChange(
-            (obj, oldObj) => output.change(mapper(obj), mapper(oldObj))
-        )
-      }
-    },
-    sessionUnreadHistoriesCount: { /// For Counting
-      function: async function(input, output) {
-        function mapper(obj) {
-          return obj && { id: obj.id,
-            unread: obj.unread && obj.unread.length || 0,
-            unanswered: obj.unanswered && obj.unanswered.length || 0
-          }
-        }
-        await input.index('readHistory_ReadHistory_sessionUnreadHistoriesIds').onChange(
-            (obj, oldObj) => output.change(mapper(obj), mapper(oldObj))
-        )
-      }
-    },
-    userUnreadHistoriesCountByType: { /// For counting
-      function: async function(input, output) {
-        function mapper(obj) {
-          return obj && { id: obj.id,
-            unread: obj.unread && obj.unread.length || 0,
-            unanswered: obj.unanswered && obj.unanswered.length || 0
-          }
-        }
-        await input.index('readHistory_ReadHistory_userUnreadHistoriesIdsByType').onChange(
-            (obj, oldObj) => output.change(mapper(obj), mapper(oldObj))
-        )
-      }
-    },
-    sessionUnreadHistoriesCountByType: { /// For Counting
-      function: async function(input, output) {
-        function mapper(obj) {
-          return obj && { id: obj.id,
-            unread: obj.unread && obj.unread.length || 0,
-            unanswered: obj.unanswered && obj.unanswered.length || 0
-          }
-        }
-        await input.index('readHistory_ReadHistory_sessionUnreadHistoriesIdsByType').onChange(
-            (obj, oldObj) => output.change(mapper(obj), mapper(oldObj))
-        )
-      }
     }//*/
-
   }
 })
 
