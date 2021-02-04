@@ -166,6 +166,129 @@ const ReadHistory = definition.model({
     },
 
     //*
+    userUnreadHistories: {
+      property: ['user', 'last', 'read'],
+      function: async function(input, output) {
+        const mapper =
+            (obj) => obj && ((obj.read||'') < (obj.last||'')) && obj.user &&
+                ({ id: `${obj.user}_${obj.toType}_${obj.toId}`, user: obj.user, to: obj.id })
+        await input.table('readHistory_ReadHistory').onChange(
+            (obj, oldObj) => output.change(obj && mapper(obj), oldObj && mapper(oldObj))
+        )
+      }
+    },
+    userUnreadHistoriesCount: { /// For counting
+      function: async function(input, output) {
+        const unreadIndex = await input.index('readHistory_ReadHistory_userUnreadHistories')
+        await unreadIndex.onChange(
+            async (obj, oldObj) => {
+              const user = (obj && obj.user) || (oldObj && oldObj.user)
+              const unread = await unreadIndex.count({
+                gt: user + '_',
+                lt: user + '_\xFF'
+              })
+              output.put({
+                id: user,
+                unread
+              })
+            }
+        )
+      }
+    },
+    sessionUnreadHistories: {
+      property: ['publicSessionInfo', 'last', 'read'],
+      function: async function(input, output) {
+        const mapper =
+            (obj) => obj && ((obj.read||'') < (obj.last||'')) && obj.publicSessionInfo &&
+                ({ id: `${obj.publicSessionInfo}_${obj.toType}_${obj.toId}`, publicSessionInfo: obj.publicSessionInfo, to: obj.id })
+        await input.table('readHistory_ReadHistory').onChange(
+            (obj, oldObj) => output.change(obj && mapper(obj), oldObj && mapper(oldObj))
+        )
+      }
+    },
+    sessionUnreadHistoriesCount: { /// For counting
+      function: async function(input, output) {
+        const unreadIndex = await input.index('readHistory_ReadHistory_sessionUnreadHistories')
+        await unreadIndex.onChange(
+            async (obj, oldObj) => {
+              const publicSessionInfo = (obj && obj.publicSessionInfo) || (oldObj && oldObj.publicSessionInfo)
+              const unread = await unreadIndex.count({
+                gt: publicSessionInfo + '_',
+                lt: publicSessionInfo + '_\xFF'
+              })
+              output.put({
+                id: publicSessionInfo,
+                unread
+              })
+            }
+        )
+      }
+    },
+    userUnreadHistoriesByType: {
+      property: ['user', 'last', 'read', 'toType'],
+      function: async function(input, output) {
+        const mapper =
+            (obj) => obj && ((obj.read||'') < (obj.last||'')) && obj.user &&
+                ({ id: `${obj.user}_${obj.toType}_${obj.toId}`,
+                  user: obj.user, toType: obj.toType, toId: obj.toId })
+        await input.table('readHistory_ReadHistory').onChange(
+            (obj, oldObj) => output.change(obj && mapper(obj), oldObj && mapper(oldObj))
+        )
+      }
+    },
+    userUnreadHistoriesCountByType: { /// For counting
+      function: async function(input, output) {
+        const unreadIndex = await input.index('readHistory_ReadHistory_userUnreadHistoriesByType')
+        await unreadIndex.onChange(
+            async (obj, oldObj) => {
+              const user = (obj && obj.user) || (oldObj && oldObj.user)
+              const toType = (obj && obj.toType) || (oldObj && oldObj.toType)
+              const unread = await unreadIndex.count({
+                gt: user + '_' + toType + '_',
+                lt: user + '_' + toType + '_\xFF'
+              })
+              output.put({
+                id: user + '_' + toType,
+                unread
+              })
+            }
+        )
+      }
+    },
+    sessionUnreadHistoriesByType: {
+      property: ['publicSessionInfo', 'last', 'read', 'toType'],
+      function: async function(input, output) {
+        const mapper =
+            (obj) => obj && ((obj.read||'') < (obj.last||'')) && obj.publicSessionInfo &&
+                ({ id: `${obj.publicSessionInfo}_${obj.toType}_${obj.toId}`,
+                  publicSessionInfo: obj.publicSessionInfo, toType: obj.toType, toId: obj.toId })
+        await input.table('readHistory_ReadHistory').onChange(
+            (obj, oldObj) => output.change(obj && mapper(obj), oldObj && mapper(oldObj))
+        )
+      }
+    },
+    sessionUnreadHistoriesCountByType: { /// For counting
+      function: async function(input, output) {
+        const unreadIndex = await input.index('readHistory_ReadHistory_sessionUnreadHistoriesByType')
+        await unreadIndex.onChange(
+            async (obj, oldObj) => {
+              const publicSessionInfo = (obj && obj.publicSessionInfo) || (oldObj && oldObj.publicSessionInfo)
+              const toType = (obj && obj.toType) || (oldObj && oldObj.toType)
+              const unread = await unreadIndex.count({
+                gt: publicSessionInfo + '_' + toType + '_',
+                lt: publicSessionInfo + '_' + toType + '_\xFF'
+              })
+              output.put({
+                id: publicSessionInfo + '_' + toType,
+                unread
+              })
+            }
+        )
+      }
+    },
+    //*/
+
+    /*
     userUnreadHistoriesCount: { /// For counting
       function: unreadHistoriesCountFunction,
       parameters: {
