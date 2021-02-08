@@ -145,7 +145,10 @@ const ReadHistory = definition.model({
         function mapper(obj) {
           const lastTime = (obj && obj.last && obj.last.split("_").pop()) || ''
           const writeTime = (obj && obj.write && obj.write.split("_").pop()) || ''
-          return obj && { id: `"${obj.user}":"${lastTime > writeTime ? lastTime : writeTime}"_${obj.id}`, to: obj.id  }
+          return obj && obj.user && {
+            id: `"${obj.user}":"${lastTime > writeTime ? lastTime : writeTime}"_${obj.id}`,
+            to: obj.id
+          }
         }
         await input.table('readHistory_ReadHistory').onChange(
             (obj, oldObj) => output.change(mapper(obj), mapper(oldObj))
@@ -153,14 +156,54 @@ const ReadHistory = definition.model({
       }
     },
     sessionReadHistories: {
-      property: ['publicSessionInfo', 'last']
+      property: ['publicSessionInfo', 'last'],
+      function: async function(input, output) {
+        function mapper(obj) {
+          const lastTime = (obj && obj.last && obj.last.split("_").pop()) || ''
+          const writeTime = (obj && obj.write && obj.write.split("_").pop()) || ''
+          return obj && obj.publicSessionInfo && {
+            id: `"${obj.publicSessionInfo}":"${lastTime > writeTime ? lastTime : writeTime}"_${obj.id}`,
+            to: obj.id
+          }
+        }
+        await input.table('readHistory_ReadHistory').onChange(
+            (obj, oldObj) => output.change(mapper(obj), mapper(oldObj))
+        )
+      }
     },
     userReadHistoriesByType: {
-      property: ['user', 'toType', 'last']
+      property: ['user', 'toType', 'last'],
+      function: async function(input, output) {
+        function mapper(obj) {
+          const lastTime = (obj && obj.last && obj.last.split("_").pop()) || ''
+          const writeTime = (obj && obj.write && obj.write.split("_").pop()) || ''
+          return obj && obj.user && {
+            id: `"${obj.user}"_"${obj.toType}":"${lastTime > writeTime ? lastTime : writeTime}"_${obj.id}`,
+            to: obj.id
+          }
+        }
+        await input.table('readHistory_ReadHistory').onChange(
+            (obj, oldObj) => output.change(mapper(obj), mapper(oldObj))
+        )
+      }
     },
     sessionReadHistoriesByType: {
-      property: ['publicSessionInfo', 'toType', 'last']
+      property: ['publicSessionInfo', 'toType', 'last'],
+      function: async function(input, output) {
+        function mapper(obj) {
+          const lastTime = (obj && obj.last && obj.last.split("_").pop()) || ''
+          const writeTime = (obj && obj.write && obj.write.split("_").pop()) || ''
+          return obj && obj.publicSessionInfo && {
+            id: `"${obj.publicSessionInfo}"_"${obj.toType}":"${lastTime > writeTime ? lastTime : writeTime}"_${obj.id}`,
+            to: obj.id
+          }
+        }
+        await input.table('readHistory_ReadHistory').onChange(
+            (obj, oldObj) => output.change(mapper(obj), mapper(oldObj))
+        )
+      }
     },
+
     readHistories: {
       property: ['toType', 'toId']
     },
@@ -363,7 +406,75 @@ definition.view({
   }
 })
 
+function readHistoriesDaoPath(index, prefix, { gt, lt, gte, lte, limit, reverse }) {
+  if(!Number.isSafeInteger(limit)) limit = 100
+  function getPrefix(id) {
+    if(id === '') return `${prefix}:`
+    if(id === '\xFF\xFF\xFF\xFF') return `${prefix}:\xFF\xFF\xFF\xFF`
+    return `${prefix}:"${id.match(/":"([0-9-]+T[0-9:]+.[0-9]+Z)"_/)[1]}"_`
+  }
+  const range = {
+    gt: (typeof gt == 'string') ? getPrefix(gt)+"\xFF\xFF\xFF\xFF" : undefined,
+    lt: (typeof lt == 'string') ? getPrefix(lt) : undefined,
+    gte: (typeof gte == 'string') ? getPrefix(gte) : (typeof gt == 'string' ? undefined : `${prefix}`),
+    lte: (typeof lte == 'string')
+        ? getPrefix(lte)+"\xFF\xFF\xFF\xFF"
+        : (typeof lt == 'string' ? undefined : `${prefix}:\xFF\xFF\xFF\xFF`),
+    limit,
+    reverse
+  }
 
+  const tableName = ReadHistory.tableName
+
+  const path = ['database', 'query',  app.databaseName, `(${
+      async (input, output, { tableName, indexName, range }) => {
+        if(range.reverse) output.setReverse(true)
+        const outputStates = new Map()
+        const mapper = async (res) => ({ ...(await input.table(tableName).object(res.to).get()), id: res.id })
+        await (await input.index(indexName)).range(range).onChange(async (obj, oldObj) => {
+          output.debug("INDEX CHANGE", obj, oldObj)
+          if(obj && !oldObj) {
+            const data = await mapper(obj)
+            output.debug("MAPPED INDEX CHANGE", data, "FROM", obj)
+            if(data) output.change(data, null)
+          }
+          if(obj) {
+            let outputState = outputStates.get(obj.id)
+            if(!outputState) {
+              outputState = { data: undefined, refs: 1 }
+              outputState.reader = input.table(tableName).object(obj.to)
+              const ind = obj
+              outputStates.set(obj.id, outputState)
+              outputState.observer = await outputState.reader.onChange(async obj => {
+                //output.debug("OBJ CHANGE", obj, "IN INDEX", ind, "REFS", outputState.refs)
+                if(outputState.refs <= 0) return
+                const data = { ...obj, id: ind.id }
+                const oldData = outputState.data
+                output.change(data, oldData)
+                output.debug("READER INDEX CHANGE", data, "FROM", ind.to)
+                outputState.data = data || null
+              })
+            } else if(!oldObj) {
+              outputState.refs ++
+            }
+          } else if(oldObj && oldObj.to) {
+            let outputState = outputStates.get(oldObj.id)
+            if(outputState) {
+              outputState.refs --
+              //output.debug("INDEX DELETE", oldObj.id, "REFS", outputState.refs)
+              if(outputState.refs <= 0) {
+                outputState.reader.unobserve(outputState.observer)
+                outputStates.delete(oldObj.id)
+                output.change(null, outputState.data)
+                output.debug("READER INDEX DELETE FROM", oldObj.to)
+              }
+            }
+          }
+        })
+      }
+  })`, { indexName: tableName+'_'+index, tableName, range }]
+  return path
+}
 
 definition.view({
   name: "myReadHistories",
@@ -399,86 +510,7 @@ definition.view({
         ? ['userReadHistories', `"${client.user}"`]
         : ['sessionReadHistories', `"${(await getPublicInfo(client.sessionId)).id}"`]
     //console.log("COMPUTE RANGE")
-    if(!Number.isSafeInteger(limit)) limit = 100
-    function getPrefix(id) {
-      if(id === '') return `${prefix}:`
-      if(id === '\xFF\xFF\xFF\xFF') return `${prefix}:\xFF\xFF\xFF\xFF`
-      return `${prefix}:"${id.match(/":"([0-9-]+T[0-9:]+.[0-9]+Z)"_/)[1]}"_`
-    }
-    const range = {
-      gt: (typeof gt == 'string') ? getPrefix(gt)+"\xFF\xFF\xFF\xFF" : undefined,
-      lt: (typeof lt == 'string') ? getPrefix(lt) : undefined,
-      gte: (typeof gte == 'string') ? getPrefix(gte) : (typeof gt == 'string' ? undefined : `${prefix}`),
-      lte: (typeof lte == 'string')
-          ? getPrefix(lte)+"\xFF\xFF\xFF\xFF"
-          : (typeof lt == 'string' ? undefined : `${prefix}:\xFF\xFF\xFF\xFF`),
-      limit,
-      reverse
-    }
-
-    const tableName = ReadHistory.tableName
-
-    const path = ['database', 'query',  app.databaseName, `(${
-        async (input, output, { tableName, indexName, range }) => {
-          if(range.reverse) output.setReverse(true)
-          const outputStates = new Map()
-          const mapper = async (res) => ({ ...(await input.table(tableName).object(res.to).get()), id: res.id })
-          await (await input.index(indexName)).range(range).onChange(async (obj, oldObj) => {
-            output.debug("INDEX CHANGE", obj, oldObj)
-            if(obj && !oldObj) {
-              const data = await mapper(obj)
-              output.debug("MAPPED INDEX CHANGE", data, "FROM", obj)
-              if(data) output.change(data, null)
-            }
-            if(obj) {
-              let outputState = outputStates.get(obj.id)
-              if(!outputState) {
-                outputState = { data: undefined, refs: 1 }
-                outputState.reader = input.table(tableName).object(obj.to)
-                const ind = obj
-                outputStates.set(obj.id, outputState)
-                outputState.observer = await outputState.reader.onChange(async obj => {
-                  //output.debug("OBJ CHANGE", obj, "IN INDEX", ind, "REFS", outputState.refs)
-                  if(outputState.refs <= 0) return
-                  const data = { ...obj, id: ind.id }
-                  const oldData = outputState.data
-                  output.change(data, oldData)
-                  output.debug("READER INDEX CHANGE", data, "FROM", ind.to)
-                  outputState.data = data || null
-                })
-              } else if(!oldObj) {
-                outputState.refs ++
-              }
-            } else if(oldObj && oldObj.to) {
-              let outputState = outputStates.get(oldObj.id)
-              if(outputState) {
-                outputState.refs --
-                //output.debug("INDEX DELETE", oldObj.id, "REFS", outputState.refs)
-                if(outputState.refs <= 0) {
-                  outputState.reader.unobserve(outputState.observer)
-                  outputStates.delete(oldObj.id)
-                  output.change(null, outputState.data)
-                  output.debug("READER INDEX DELETE FROM", oldObj.to)
-                }
-              }
-            }
-          })
-        }
-    })`, { indexName: tableName+'_'+index, tableName, range }]
-
-   /* const histories = await app.dao.get(path)
-    console.log("HISTORIES RANGE SRC", { gt, lt, gte, lte, limit, reverse }, "TO", range,
-        "RESULTS", histories.length, histories.map(h => h.id))
-    return null
-    console.log("HISTORIES RANGE PATH", JSON.stringify(path))
-    app.dao.observable(path).observe((signal, value ) => {
-      if(signal == 'set') {
-        if(value.length !=  histories.length) console.error("WRONG OBSERVABLE SET!", value, histories)
-        console.log("HISTORIES RANGE SRC", { gt, lt, gte, lte, limit, reverse }, "TO", range,
-            "SET", value.length, value.map(h => h.id))
-      }
-    })*/
-    return path
+    return readHistoriesDaoPath(index, prefix, { gt, lt, gte, lte, limit, reverse })
   }
 })
 
@@ -514,22 +546,12 @@ definition.view({
     }
   },
   async daoPath({ toType, gt, lt, gte, lte, limit, reverse }, { client, service }, method) {
+    //console.log("READ MY HISTORIES", client.user)
     const [index, prefix] = client.user
         ? ['userReadHistoriesByType', `"${client.user}"_"${toType}"`]
         : ['sessionReadHistoriesByType', `"${(await getPublicInfo(client.sessionId)).id}"_"${toType}"`]
-    if(!Number.isSafeInteger(limit)) limit = 100
-    const range = {
-      gt: gt ? `${prefix}:"${gt.split('_').pop()}"` : (gte ? undefined : `${prefix}:`),
-      lt: lt ? `${prefix}:"${lt.split('_').pop()}"` : undefined,
-      gte: gte ? `${prefix}:"${gte.split('_').pop()}"` : undefined,
-      lte: lte ? `${prefix}:"${lte.split('_').pop()}"\xFF` : ( lt ? undefined : `${prefix}:\xFF\xFF\xFF\xFF`),
-      limit,
-      reverse
-    }
-    /*console.log("HISTORIES RANGE", range)
-    const histories = await ReadHistory.indexRangeGet(index, range)
-    console.log("HISTORIES RANGE", range, "RESULTS", histories.length)*/
-    return ReadHistory.indexRangePath(index, range)
+    //console.log("COMPUTE RANGE")
+    return readHistoriesDaoPath(index, prefix, { gt, lt, gte, lte, limit, reverse })
   }
 })
 
@@ -562,8 +584,8 @@ definition.view({
   },
   async daoPath({ toType }, { client, service }, method) {
     const [index, id] = client.user
-        ? ['userReadHistoriesCountByType', `${client.user}_${toType}`]
-        : ['sessionReadHistoriesCountByType', `${(await getPublicInfo(client.sessionId)).id}_${toType}`]
+        ? ['userUnreadHistoriesCountByType', `${client.user}_${toType}`]
+        : ['sessionUnreadHistoriesCountByType', `${(await getPublicInfo(client.sessionId)).id}_${toType}`]
     return ['database', 'indexObject', app.databaseName, 'readHistory_ReadHistory_'+index, id]
   }
 })
