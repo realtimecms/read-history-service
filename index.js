@@ -147,11 +147,32 @@ const ReadHistory = definition.model({
           const writeTime = (obj && obj.write && obj.write.split("_").pop()) || ''
           return obj && obj.user && {
             id: `"${obj.user}":"${lastTime > writeTime ? lastTime : writeTime}"_${obj.id}`,
-            to: obj.id
+            to: obj.id,
+            user: obj.user
           }
         }
         await input.table('readHistory_ReadHistory').onChange(
             (obj, oldObj) => output.change(mapper(obj), mapper(oldObj))
+        )
+      }
+    },
+    userReadHistoriesCount: { /// For counting
+      function: async function(input, output) {
+        const unreadIndex = await input.index('readHistory_ReadHistory_userReadHistories')
+        await unreadIndex.onChange(
+            async (obj, oldObj) => {
+              const user = (obj && obj.user) || (oldObj && oldObj.user)
+              const prefix = `"${user}"`
+              const read = await unreadIndex.count({
+                gt: prefix + ':',
+                lt: prefix + ':\xFF',
+                limit: 500
+              })
+              output.put({
+                id: user,
+                read
+              })
+            }
         )
       }
     },
@@ -163,11 +184,32 @@ const ReadHistory = definition.model({
           const writeTime = (obj && obj.write && obj.write.split("_").pop()) || ''
           return obj && obj.publicSessionInfo && {
             id: `"${obj.publicSessionInfo}":"${lastTime > writeTime ? lastTime : writeTime}"_${obj.id}`,
-            to: obj.id
+            to: obj.id,
+            session: obj.publicSessionInfo
           }
         }
         await input.table('readHistory_ReadHistory').onChange(
             (obj, oldObj) => output.change(mapper(obj), mapper(oldObj))
+        )
+      }
+    },
+    sessionReadHistoriesCount: { /// For counting
+      function: async function(input, output) {
+        const unreadIndex = await input.index('readHistory_ReadHistory_sessionReadHistories')
+        await unreadIndex.onChange(
+            async (obj, oldObj) => {
+              const session = (obj && obj.session) || (oldObj && oldObj.session)
+              const prefix = `"${session}"`
+              const read = await unreadIndex.count({
+                gt: prefix + ':',
+                lt: prefix + ':\xFF',
+                limit: 500
+              })
+              output.put({
+                id: session,
+                read
+              })
+            }
         )
       }
     },
@@ -179,11 +221,34 @@ const ReadHistory = definition.model({
           const writeTime = (obj && obj.write && obj.write.split("_").pop()) || ''
           return obj && obj.user && {
             id: `"${obj.user}"_"${obj.toType}":"${lastTime > writeTime ? lastTime : writeTime}"_${obj.id}`,
-            to: obj.id
+            to: obj.id,
+            user: obj.user,
+            toType: obj.toType
           }
         }
         await input.table('readHistory_ReadHistory').onChange(
             (obj, oldObj) => output.change(mapper(obj), mapper(oldObj))
+        )
+      }
+    },
+    userReadHistoriesCountByType: { /// For counting
+      function: async function(input, output) {
+        const unreadIndex = await input.index('readHistory_ReadHistory_userReadHistoriesByType')
+        await unreadIndex.onChange(
+            async (obj, oldObj) => {
+              const user = (obj && obj.user) || (oldObj && oldObj.user)
+              const toType = (obj && obj.toType) || (oldObj && oldObj.toType)
+              const prefix = `"${user}"_"${toType}"`
+              const read = await unreadIndex.count({
+                gt: prefix + ':',
+                lt: prefix + ':\xFF',
+                limit: 500
+              })
+              output.put({
+                id: user+'_'+toType,
+                read
+              })
+            }
         )
       }
     },
@@ -195,11 +260,34 @@ const ReadHistory = definition.model({
           const writeTime = (obj && obj.write && obj.write.split("_").pop()) || ''
           return obj && obj.publicSessionInfo && {
             id: `"${obj.publicSessionInfo}"_"${obj.toType}":"${lastTime > writeTime ? lastTime : writeTime}"_${obj.id}`,
-            to: obj.id
+            to: obj.id,
+            session: obj.publicSessionInfo,
+            toType: obj.toType
           }
         }
         await input.table('readHistory_ReadHistory').onChange(
             (obj, oldObj) => output.change(mapper(obj), mapper(oldObj))
+        )
+      }
+    },
+    sessionReadHistoriesCountByType: { /// For counting
+      function: async function(input, output) {
+        const unreadIndex = await input.index('readHistory_ReadHistory_sessionReadHistoriesByType')
+        await unreadIndex.onChange(
+            async (obj, oldObj) => {
+              const session = (obj && obj.session) || (oldObj && oldObj.session)
+              const toType = (obj && obj.toType) || (oldObj && oldObj.toType)
+              const prefix = `"${session}"_"${toType}"`
+              const read = await unreadIndex.count({
+                gt: prefix + ':',
+                lt: prefix + ':\xFF',
+                limit: 500
+              })
+              output.put({
+                id: session+'_'+toType,
+                read
+              })
+            }
         )
       }
     },
@@ -556,6 +644,23 @@ definition.view({
 })
 
 definition.view({
+  name: "myReadCount",
+  properties: {
+
+  },
+  returns: {
+    type: Object
+  },
+  async daoPath({ }, { client, service }, method) {
+    const [index, id] = client.user
+        ? ['userReadHistoriesCount', `${client.user}`]
+        : ['sessionReadHistoriesCount', `${(await getPublicInfo(client.sessionId)).id}`]
+    console.log("UNREAD", index, id)
+    return ['database', 'indexObject', app.databaseName, 'readHistory_ReadHistory_'+index, id]
+  }
+})
+
+definition.view({
   name: "myUnreadCount",
   properties: {
 
@@ -568,6 +673,24 @@ definition.view({
         ? ['userUnreadHistoriesCount', `${client.user}`]
         : ['sessionUnreadHistoriesCount', `${(await getPublicInfo(client.sessionId)).id}`]
     console.log("UNREAD", index, id)
+    return ['database', 'indexObject', app.databaseName, 'readHistory_ReadHistory_'+index, id]
+  }
+})
+
+definition.view({
+  name: "myReadCountByType",
+  properties: {
+    toType: {
+      type: String
+    }
+  },
+  returns: {
+    type: Object
+  },
+  async daoPath({ toType }, { client, service }, method) {
+    const [index, id] = client.user
+        ? ['userReadHistoriesCountByType', `${client.user}_${toType}`]
+        : ['sessionReadHistoriesCountByType', `${(await getPublicInfo(client.sessionId)).id}_${toType}`]
     return ['database', 'indexObject', app.databaseName, 'readHistory_ReadHistory_'+index, id]
   }
 })
