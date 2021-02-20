@@ -518,7 +518,10 @@ function readHistoriesDaoPath(index, prefix, { gt, lt, gte, lte, limit, reverse 
       async (input, output, { tableName, indexName, range }) => {
         if(range.reverse) output.setReverse(true)
         const outputStates = new Map()
-        const mapper = async (res) => ({ ...(await input.table(tableName).object(res.to).get()), id: res.id })
+        const mapper = async (res) => {
+          const obj = (await input.table(tableName).object(res.to).get())
+          return obj && ({ ...obj, id: res.id }) || null
+        }
         await (await input.index(indexName)).range(range).onChange(async (obj, oldObj) => {
           output.debug("INDEX CHANGE", obj, oldObj)
           if(obj && !oldObj) {
@@ -536,7 +539,7 @@ function readHistoriesDaoPath(index, prefix, { gt, lt, gte, lte, limit, reverse 
               outputState.observer = await outputState.reader.onChange(async obj => {
                 //output.debug("OBJ CHANGE", obj, "IN INDEX", ind, "REFS", outputState.refs)
                 if(outputState.refs <= 0) return
-                const data = { ...obj, id: ind.id }
+                const data = obj && { ...obj, id: ind.id } || null
                 const oldData = outputState.data
                 output.change(data, oldData)
                 output.debug("READER INDEX CHANGE", data, "FROM", ind.to)
