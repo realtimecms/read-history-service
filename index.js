@@ -20,87 +20,6 @@ const User = definition.foreignModel('users', 'User')
 const PublicSessionInfo = definition.foreignModel('accessControl', 'PublicSessionInfo')
 
 
-const unreadHistoriesCountFunction = async function(input, output, { idFunction }) {
-  const getId = eval(idFunction)
-  await input.table('readHistory_ReadHistory').onChange(
-      (obj, oldObj, id, ts) => {
-        const indexId = obj ? getId(obj) : getId(oldObj)
-        if(!indexId) return
-        const unread = obj && (obj.read||'') < (obj.last||'')
-        const oldUnread = oldObj && (oldObj.read||'') < (oldObj.last||'')
-        if(unread && !oldUnread) { // now unread
-          output.update(indexId, [
-            { op: "conditional",
-              conditions: [
-                { test: 'notExist', property: 'unread' }
-              ],
-              operations: [
-                { op: 'set', property: 'unread', value: 1 },
-                { op: 'set', property: 'unreadUpdate', value: ts }
-              ]
-            },
-            { op: "conditional",
-              conditions: [
-                { test: 'lt', property: 'unreadUpdate', value: ts }
-              ],
-              operations: [
-                { op: 'add', property: 'unread', value: 1 }
-              ]
-            },
-            { op: 'merge', value: { severity: obj.severity, scan: obj.scan, unreadUpdate: ts } },
-          ])
-        } else if(!unread && oldUnread) { // been unread
-          output.update(indexId, [
-            { op: "conditional",
-              conditions: [
-                { test: 'lt', property: 'unreadUpdate', value: ts }
-              ],
-              operations: [
-                { op: 'add', property: 'unread', value: -1 }
-              ]
-            }
-          ])
-        }
-
-        const unanswered = obj && (obj.write||'') > (obj.last||'')
-        const oldUnanswered = oldObj && (oldObj.write||'') > (oldObj.last||'')
-        if(unanswered && !oldUnanswered) { // now unread
-          output.update(indexId, [
-            { op: "conditional",
-              conditions: [
-                { test: 'notExist', property: 'unanswered' }
-              ],
-              operations: [
-                { op: 'set', property: 'unanswered', value: 1 },
-                { op: 'set', property: 'unansweredUpdate', value: ts }
-              ]
-            },
-            { op: "conditional",
-              conditions: [
-                { test: 'lt', property: 'unansweredUpdate', value: ts }
-              ],
-              operations: [
-                { op: 'add', property: 'unanswered', value: 1 }
-              ]
-            },
-            { op: 'merge', value: { severity: obj.severity, scan: obj.scan, unansweredUpdate: ts } },
-          ])
-        } else if(!unanswered && oldUnanswered) { // been unread
-          output.update(indexId, [
-            { op: "conditional",
-              conditions: [
-                { test: 'lt', property: 'unansweredUpdate', value: ts }
-              ],
-              operations: [
-                { op: 'add', property: 'unanswered', value: -1 }
-              ]
-            }
-          ])
-        }
-      }
-  )
-}
-
 const ReadHistory = definition.model({
   name: "ReadHistory",
   properties: {
@@ -145,6 +64,11 @@ const ReadHistory = definition.model({
         function mapper(obj) {
           const lastTime = (obj && obj.last && obj.last.split("_").pop()) || ''
           const writeTime = (obj && obj.write && obj.write.split("_").pop()) || ''
+          if(obj && obj.user && typeof obj.user != 'string') {
+            output.debug('TABLE readHistory_ReadHistory ', obj.id, 'user', JSON.stringify(obj))
+            throw new Error("USER IS NOT STRING in "+obj.id+" TYPE ", typeof (obj.user),
+                " OBJ "+ JSON.stringify(obj))
+          }
           return obj && obj.user && {
             id: `"${obj.user}":"${lastTime > writeTime ? lastTime : writeTime}"_${obj.id}`,
             to: obj.id,
@@ -162,6 +86,10 @@ const ReadHistory = definition.model({
         await unreadIndex.onChange(
             async (obj, oldObj) => {
               const user = (obj && obj.user) || (oldObj && oldObj.user)
+              if(user && typeof user != 'string') {
+                output.debug('INDEX readHistory_ReadHistory_userReadHistories', obj.id, 'user', obj.user)
+                throw new Error("USER IS NOT STRING")
+              }
               const prefix = `"${user}"`
               const read = await unreadIndex.count({
                 gt: prefix + ':',
@@ -417,33 +345,6 @@ const ReadHistory = definition.model({
         )
       }
     },
-    //*/
-
-    /*
-    userUnreadHistoriesCount: { /// For counting
-      function: unreadHistoriesCountFunction,
-      parameters: {
-        idFunction: `(${(obj => obj.user)})`
-      }
-    },
-    sessionUnreadHistoriesCount: { /// For Counting
-      function: unreadHistoriesCountFunction,
-      parameters: {
-        idFunction: `(${(obj => obj.publicSessionInfo)})`
-      }
-    },
-    userUnreadHistoriesCountByType: { /// For counting
-      function: unreadHistoriesCountFunction,
-      parameters: {
-        idFunction: `(${(obj => `${obj.user}_${obj.toType}`)})`
-      }
-    },
-    sessionUnreadHistoriesCountByType: { /// For Counting
-      function: unreadHistoriesCountFunction,
-      parameters: {
-        idFunction: `(${(obj => `${obj.publicSessionInfo}_${obj.toType}`)})`
-      }
-    }//*/
   }
 })
 
@@ -720,6 +621,7 @@ definition.event({
   name: "newEvent",
   async execute({ user, publicSessionInfo, toType, toId, eventId }) {
     const id = (user ? `user_${user}` : `session_${publicSessionInfo}`) + `_${toType}_${toId}`
+    if(user && typeof user != 'string') throw new Error("user is not string", id, 'user = ', user)
     await ReadHistory.update(id, [
       { op: 'reverseMerge', value: { id, user, publicSessionInfo, toType, toId } }, // If not exists
       { op: 'max', property: 'last', value: eventId }
@@ -731,6 +633,7 @@ definition.event({
   name: "write",
   async execute({ user, publicSessionInfo, toType, toId, eventId }) {
     const id = (user ? `user_${user}` : `session_${publicSessionInfo}`) + `_${toType}_${toId}`
+    if(user && typeof user != 'string') throw new Error("user is not string", id, 'user = ', user)
     await ReadHistory.update(id, [
       { op: 'reverseMerge', value: { id, user, publicSessionInfo, toType, toId } }, // If not exists
       { op: 'max', property: 'write', value: eventId }
@@ -742,6 +645,7 @@ definition.event({
   name: "read",
   async execute({ user, publicSessionInfo, toType, toId, eventId }) {
     const id = (user ? `user_${user}` : `session_${publicSessionInfo}`) + `_${toType}_${toId}`
+    if(user && typeof user != 'string') throw new Error("user is not string", id, 'user = ', user)
     await ReadHistory.update(id, [
       { op: 'reverseMerge', value: { id, user, publicSessionInfo, toType, toId } }, // If not exists
       { op: 'max', property: 'read', value: eventId }
@@ -753,6 +657,7 @@ definition.event({
   name: "emailNotification",
   async execute({ user, publicSessionInfo, toType, toId, eventId }) {
     const id = (user ? `user_${user}` : `session_${publicSessionInfo}`) + `_${toType}_${toId}`
+    if(user && typeof user != 'string') throw new Error("user is not string", id, 'user = ', user)
     ReadHistory.update(id, [
       { op: 'reverseMerge', value: { id, user, publicSessionInfo, toType, toId } }, // If not exists
       { op: 'max', property: 'lastEmailNotification', value: eventId }
@@ -764,6 +669,7 @@ definition.event({
   name: "smsNotification",
   async execute({ user, publicSessionInfo, toType, toId, eventId }) {
     const id = (user ? `user_${user}` : `session_${publicSessionInfo}`) + `_${toType}_${toId}`
+    if(user && typeof user != 'string') throw new Error("user is not string", id, 'user = ', user)
     ReadHistory.update(id, [
       { op: 'reverseMerge', value: { id, user, publicSessionInfo, toType, toId } }, // If not exists
       { op: 'max', property: 'lastSmsNotification', value: eventId }
