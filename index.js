@@ -224,7 +224,6 @@ const ReadHistory = definition.model({
       property: ['toType', 'toId']
     },
 
-    //*
     userUnreadHistories: {
       property: ['user', 'last', 'read'],
       function: async function(input, output) {
