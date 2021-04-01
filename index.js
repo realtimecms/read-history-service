@@ -423,10 +423,10 @@ function readHistoriesDaoPath(index, prefix, { gt, lt, gte, lte, limit, reverse 
           return obj && ({ ...obj, id: res.id }) || null
         }
         await (await input.index(indexName)).range(range).onChange(async (obj, oldObj) => {
-          output.debug("INDEX CHANGE", obj, oldObj)
+          //output.debug("INDEX CHANGE", obj, oldObj)
           if(obj && !oldObj) {
             const data = await mapper(obj)
-            output.debug("MAPPED INDEX CHANGE", data, "FROM", obj)
+            //output.debug("MAPPED INDEX CHANGE", data, "FROM", obj)
             if(data) output.change(data, null)
           }
           if(obj) {
@@ -442,7 +442,7 @@ function readHistoriesDaoPath(index, prefix, { gt, lt, gte, lte, limit, reverse 
                 const data = obj && { ...obj, id: ind.id } || null
                 const oldData = outputState.data
                 output.change(data, oldData)
-                output.debug("READER INDEX CHANGE", data, "FROM", ind.to)
+                //output.debug("READER INDEX CHANGE", data, "FROM", ind.to)
                 outputState.data = data || null
               })
             } else if(!oldObj) {
@@ -457,7 +457,7 @@ function readHistoriesDaoPath(index, prefix, { gt, lt, gte, lte, limit, reverse 
                 outputState.reader.unobserve(outputState.observer)
                 outputStates.delete(oldObj.id)
                 output.change(null, outputState.data)
-                output.debug("READER INDEX DELETE FROM", oldObj.to)
+                //output.debug("READER INDEX DELETE FROM", oldObj.to)
               }
             }
           }
