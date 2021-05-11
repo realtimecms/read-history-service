@@ -797,7 +797,7 @@ definition.trigger({
   async execute({ user, toType, toId }, { service }, emit) {
     console.log("STARTED EMAIL CHECK!", user, toType, toId)
     const readHistory =  await ReadHistory.indexObjectGet('userReadHistory', [user, toType, toId])
-    if(readHistory.lastEmailNotification > readHistory.last) return // already notified about everything
+    if(!readHistory || readHistory.lastEmailNotification > readHistory.last) return // already notified about everything
 
     console.log("GOT READ HISTORY!", readHistory.lastEmailNotification)
 
