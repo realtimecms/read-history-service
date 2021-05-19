@@ -11,10 +11,10 @@ const definition = app.createServiceDefinition({
   validators
 })
 
-const config = require('../config/readHistory.js')(app, definition)
+const config = require('../config/readHistory.js')(definition)
 
 const { getAccess, hasRole, checkIfRole, getPublicInfo } =
-    require("../access-control-service/access.js")(app, definition)
+    require("../access-control-service/access.js")(definition)
 
 const User = definition.foreignModel('users', 'User')
 const PublicSessionInfo = definition.foreignModel('accessControl', 'PublicSessionInfo')
